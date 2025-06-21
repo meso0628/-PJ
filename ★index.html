@@ -1,0 +1,362 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>【最終完成版】碓井俊樹 The Global Footprints - 100の物語</title>
+    
+    <!-- Libraries (CDN) -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.css" />
+    <link rel="stylesheet" href="https://unpkg.com/leaflet.markercluster@1.5.3/dist/MarkerCluster.Default.css" />
+    <script src="https://unpkg.com/leaflet.markercluster@1.5.3/dist/leaflet.markercluster.js"></script>
+    
+    <!-- Fonts & Icons (CDN) -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@600&family=Noto+Sans+JP:wght@400;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css"/>
+
+    <style>
+        :root {
+            --font-serif: 'Noto Serif JP', serif;
+            --font-sans: 'Noto Sans JP', sans-serif;
+            --bg-base: #f4f6f9;
+            --bg-sidebar: #ffffff;
+            --bg-panel: #212529;
+            --text-dark: #343a40;
+            --text-light: #f8f9fa;
+            --text-muted: #6c757d;
+            --accent-gold: #e5bf37;
+            --accent-blue: #007bff;
+            --border-color: #e9ecef;
+            --shadow-soft: 0 4px 12px rgba(0,0,0,0.08);
+        }
+
+        html, body {
+            margin: 0; padding: 0; height: 100vh; width: 100vw;
+            overflow: hidden; font-family: var(--font-sans);
+            background-color: var(--bg-base);
+        }
+        * { box-sizing: border-box; }
+        
+        #loader {
+            position: fixed; top: 0; left: 0; width: 100%; height: 100%;
+            background: #fff; z-index: 9999;
+            display: flex; justify-content: center; align-items: center;
+            flex-direction: column; gap: 20px;
+            transition: opacity 0.5s;
+        }
+        .spinner {
+            width: 50px; height: 50px;
+            border: 5px solid #f3f3f3;
+            border-top: 5px solid var(--accent-blue);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+
+        #app-container { display: flex; height: 100%; width: 100%; visibility: hidden; }
+        #app-container.loaded { visibility: visible; }
+
+        #sidebar {
+            width: 400px; background-color: var(--bg-sidebar);
+            border-right: 1px solid var(--border-color);
+            display: flex; flex-direction: column; flex-shrink: 0;
+            z-index: 1001;
+        }
+        #map-container { position: relative; flex-grow: 1; height: 100%; }
+        #map { width: 100%; height: 100%; background-color: #eaf2f8; }
+
+        .sidebar-header {
+            height: 180px; flex-shrink: 0;
+            background-image: linear-gradient(to top, rgba(0,0,0,0.6), rgba(0,0,0,0.1)), url('https://i.ibb.co/wJ3pS0Y/header-bg.jpg');
+            background-size: cover; background-position: center 30%;
+            color: white; display: flex; flex-direction: column;
+            justify-content: flex-end; padding: 25px;
+            text-shadow: 1px 1px 4px rgba(0,0,0,0.7);
+        }
+        .sidebar-header h1 { font-family: var(--font-serif); font-size: 2.1em; margin: 0 0 5px 0; }
+        .sidebar-header p { font-size: 1em; margin: 0; opacity: 0.9; }
+        
+        .filter-container { padding: 15px 20px; border-bottom: 1px solid var(--border-color); flex-shrink: 0; background-color: #f8f9fa; }
+        .activity-list-wrapper { overflow-y: auto; flex-grow: 1; padding: 10px 20px; }
+        .activity-card {
+            background: white; border-radius: 8px; margin-bottom: 12px;
+            padding: 15px; cursor: pointer; transition: all 0.2s ease-in-out;
+            border: 1px solid var(--border-color);
+        }
+        .activity-card:hover { transform: translateY(-2px); box-shadow: var(--shadow-soft); }
+        .activity-card.active { border-left: 4px solid var(--accent-blue); padding-left: 12px; background-color: #f0f8ff; font-weight: bold; }
+        
+        #info-panel {
+            position: absolute;
+            top: 0; right: 0;
+            width: 480px; max-width: 45vw; height: 100%;
+            background: var(--bg-panel);
+            color: var(--text-light);
+            z-index: 1000;
+            transform: translateX(100%);
+            transition: transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94);
+            box-shadow: -5px 0 25px rgba(0,0,0,0.3);
+            display: flex; flex-direction: column;
+        }
+        #info-panel.is-open { transform: translateX(0); }
+        #info-panel-close {
+            position: absolute; top: 15px; left: -50px;
+            background: rgba(0,0,0,0.6); border: none; color: white;
+            width: 40px; height: 40px; border-radius: 50%;
+            font-size: 20px; cursor: pointer; transition: all 0.3s; z-index: 10;
+        }
+        #info-panel-close:hover { background: rgba(0,0,0,0.8); transform: rotate(90deg); }
+        #info-panel-content { display: flex; flex-direction: column; height: 100%; }
+        .info-panel-media { flex-shrink: 0; height: 150px; background-color: #000; cursor: pointer; position: relative; }
+        .info-panel-media img { width: 100%; height: 100%; object-fit: cover; }
+        .info-panel-text { flex-grow: 1; padding: 25px 35px; overflow-y: auto; }
+        .info-panel-title { font-family: var(--font-serif); font-size: 1.8em; margin: 0 0 20px 0; line-height: 1.4; color: var(--accent-gold); }
+        .info-panel-meta { border-left: 3px solid var(--accent-gold); padding-left: 15px; margin-bottom: 25px; display: flex; flex-direction: column; gap: 10px; font-size: 0.9em; }
+        .info-panel-meta div { display: flex; align-items: center; gap: 10px; }
+        .info-panel-meta .meta-label { font-weight: bold; color: #adb5bd; min-width: 60px; }
+        .info-panel-story { line-height: 1.9; font-size: 0.95em; color: #dee2e6; }
+        
+        @media (max-width: 768px) {
+            #app-container { flex-direction: column; }
+            #sidebar { width: 100%; height: 45%; max-height: 45vh; }
+            #info-panel { width: 100%; max-width: 100%; height: 55%; transform: translateY(100%); }
+            #info-panel.is-open { transform: translateY(0); }
+            #info-panel-close { top: 15px; right: 15px; left: auto; background: rgba(0,0,0,0.4); }
+        }
+    </style>
+</head>
+<body>
+    <div id="loader">
+        <div class="spinner"></div>
+        <p>読み込み中...</p>
+    </div>
+    <div id="app-container">
+        <aside id="sidebar">
+            <header class="sidebar-header">
+                <h1>The Global Footprints</h1>
+                <p>ピアニスト碓井俊樹の軌跡</p>
+            </header>
+            <div class="filter-container">
+                <div id="filter-buttons" class="filter-buttons"></div>
+            </div>
+            <div class="activity-list-wrapper">
+                <ul id="activity-list" class="activity-list"></ul>
+            </div>
+        </aside>
+        <main id="map-container">
+            <div id="map"></div>
+            <div id="info-panel">
+                <button id="info-panel-close">×</button>
+                <div id="info-panel-content"></div>
+            </div>
+        </main>
+    </div>
+    
+    <script>
+        const allActivities = [
+    { id: 1, country: "Japan", city: "Tokyo", lat: 35.7289, lon: 139.7744, year: 1993, category: "教育", title: "礎の始まり：東京藝大附属高校入学", story: "日本のクラシック音楽界における王道、その入口とも言える東京藝術大学音楽学部附属音楽高等学校への入学は、15歳の碓井俊樹にとって、約束された未来への第一歩でした。この場所は単なる英才教育の場ではなく、彼の音楽的人生を形作る上で不可欠な「揺りかご」となります。ここで彼は、後に世界的な指揮者となり、横浜シンフォニエッタを共に創設する運命共同体とも言える山田和樹氏をはじめとする、生涯にわたる音楽仲間たちと出会います。日々繰り広げられる仲間との切磋琢磨、そして日本屈指の教授陣から受ける厳格かつ愛情に満ちた指導は、彼の指先に驚異的なテクニックを、そして心に音楽への尽きせぬ探求心を刻み込みました。この多感な時期に培われた人間関係と、クラシック音楽の伝統に対する深い敬意が、後の型破りなキャリアを支える、揺るぎない礎となったのです。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 2, country: "Austria", city: "Salzburg", lat: 47.8095, lon: 13.0550, year: 1999, category: "教育", title: "音楽の聖地へ：ザルツブルクでの研鑽", story: "日本の最高学府での学びを終え、彼はクラシック音楽の心臓部であるヨーロッパへと旅立ちます。モーツァルト生誕の地、ザルツブルク・モーツァルテウム芸術大学の門を叩き、伝説的ピアニスト、ヴィルヘルム・ケンプの系譜を引く名教授カール＝ハインツ・ケマリングに師事。「徹底的に音を直された」と本人が述懐するように、ここでの厳しい訓練は、彼のピアニズムにヨーロッパ伝統の深遠な響きと緻密な構築力をもたらしました。ケマリング教授から受け継いだ音への執着と音楽への誠実な姿勢は、彼の芸術家としてのアイデンティティの中核をなし、その後の国際的なキャリアを切り拓く上での精神的な羅針盤となりました。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 3, country: "Netherlands", city: "Amsterdam", lat: 52.3676, lon: 4.9041, year: 1999, category: "受賞・表彰", title: "現代音楽の旗手：オランダでの栄誉", story: "彼の芸術的好奇心は、決して過去の遺産だけに留まりませんでした。キャリアの極めて早い段階で、彼は同時代の音楽に対する鋭い感性を示します。オランダ・ミュージック・セッションにおいて、現代音楽の最も優れた演奏家に贈られる「ドネムス演奏賞」を受賞したことは、その象徴的な出来事です。この受賞は、彼が古典的なレパートリーの卓越した解釈者であると同時に、未知の音楽言語を探求し、現代の作曲家たちの声を代弁する情熱を持った「生きた」芸術家であることを証明しました。この先進的な姿勢こそ、後にプログレッシブ・ロックの演奏など、ジャンルを越境する活動へと繋がっていく萌芽だったのです。", image_url: "https://i.ibb.co/pnvXG3Q/award.jpg", video_id: null },
+    { id: 61, country: "Italy", city: "Vercelli", lat: 45.328, lon: 8.421, year: 1999, category: "受賞・表彰", title: "歴史的コンクールでの快挙：ヴィオッティ国際音楽コンクール", story: "世界で最も歴史と権威のあるコンクールの一つ、ヴィオッティ国際音楽コンクールで特別賞を受賞。このコンクールは過去に多くの伝説的なピアニストを輩出しており、ここで評価を得ることは、国際的な演奏家としてのキャリアを歩む上での重要な登竜門とされています。彼の演奏は、単なる技術的な正確さを超え、音楽の詩情や物語性を聴き手に届ける力があることを証明しました。この受賞は、彼の名前をヨーロッパの音楽地図に記す、初期の重要なマイルストーンとなりました。", image_url: "https://i.ibb.co/pnvXG3Q/award.jpg", video_id: null },
+    { id: 62, country: "Austria", city: "Vienna", lat: 48.2082, lon: 16.3738, year: 2000, category: "受賞・表彰", title: "前衛芸術との共鳴：ウィーンTAMAMUより現代芸術特別賞", story: "音楽の都ウィーンで、彼はクラシックの伝統に安住することなく、常に新しい表現の可能性を探求していました。前衛芸術団体「TAMAMU」から現代芸術特別賞を授与されたことは、その探求心が高く評価された証です。この受賞は、彼が音楽を単なる音の芸術としてではなく、より広い現代アートの文脈の中で捉え、異分野のアーティストとも積極的に対話しようとする、オープンで知的な姿勢を持っていることを示しています。彼の芸術家としての懐の深さと、未来を見据える視野の広さを物語るエピソードです。", image_url: "https://i.ibb.co/pnvXG3Q/award.jpg", video_id: null },
+    { id: 4, country: "Syria", city: "Damascus", lat: 33.5138, lon: 36.2765, year: 2001, category: "文化交流・社会貢献", title: "魂の対話：パレスチナ難民キャンプでの演奏会", story: "2001年、彼は音楽家として極めて重要な決断を下します。国連の支援を受け、シリアのパレスチナ難民キャンプでボランティア演奏会を始めたのです。これは単なる慈善活動ではありません。政治的な対立や紛争が渦巻く最も困難な場所へ、音楽という普遍的な言語を届けるという、彼の揺るぎない信念の表明でした。爆撃の音が遠くに聞こえる中で奏でられるピアノの音色は、言葉や文化、宗教の壁を越えて人々の心を繋ぎ、生きる希望の灯をともしました。この経験は彼の音楽観に深い影響を与え、芸術家としての社会的使命を生涯にわたって追求する原点となりました。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 5, country: "Italy", city: "Cantù", lat: 45.7396, lon: 9.1311, year: 2002, category: "受賞・表彰", title: "コンクールの頂点：カントゥ国際コンクール優勝", story: "若きヴィルトゥオーソは、クラシック音楽界の伝統的な試金石である国際コンクールにおいても、その才能を遺憾なく発揮します。イタリアで開催されたカントゥ市国際ピアノ協奏曲コンクールは、オーケストラとの共演能力が問われる難関ですが、彼はロマン派部門で見事第一位を獲得。この勝利は、彼の卓越したテクニックはもちろん、オーケストラと対話し、音楽全体を構築する高度な音楽的知性をヨーロッパの音楽界に示しました。この客観的な評価は、彼に国際的なキャリアを歩む上での大きな自信と信頼をもたらしました。", image_url: "https://i.ibb.co/pnvXG3Q/award.jpg", video_id: null },
+    { id: 6, country: "Haiti", city: "Port-au-Prince", lat: 18.5944, lon: -72.3074, year: 2002, category: "文化交流・社会貢献", title: "国賓としてハイチへ：音楽による復興支援", story: "まだ20代半ばにして、ハイチ共和国から国賓として招待されるという異例の栄誉を受けます。当時、政治的な混乱と貧困に苦しんでいたカリブの島国で、彼は単なる演奏家としてではなく、文化大使としての役割を担いました。彼の奏でるピアノは、困難な状況にある人々の心に希望と尊厳の光を灯し、音楽が持つ社会的な力を改めて証明しました。この経験を通じて、彼は芸術家が国際社会で果たしうる役割の大きさを深く自覚し、その後の文化外交活動へと繋がる重要な一歩を踏み出したのです。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 63, country: "Japan", city: "Tokyo", lat: 35.7289, lon: 139.7744, year: 2002, category: "受賞・表彰", title: "母校からの栄誉：東京藝術大学同声会賞受賞", story: "輝かしい国際的な活躍の一方で、彼の才能を育んだ母校もその功績を高く評価していました。卒業生の中から特に優れた活動を行った者に贈られる、歴史ある「同声会賞」を受賞。これは、彼の芸術が日本のクラシック音楽界の正統な系譜に連なり、その未来を担う存在として認められたことを意味します。彼にとって、自身を育ててくれたコミュニティからの評価は、国際的な賞とはまた違う、特別な喜びと責任感をもたらしたことでしょう。", image_url: "https://i.ibb.co/pnvXG3Q/award.jpg", video_id: null },
+    { id: 7, country: "Austria", city: "Vienna", lat: 48.2082, lon: 16.3738, year: 2003, category: "演奏活動", title: "ウィーンでの生活開始：欧州活動の拠点", story: "ザルツブルクでの学びを終え、彼は活動の拠点を「音楽の都」ウィーンへと移します。これは、単なる移住ではなく、戦略的な決断でした。ウィーンは、ヨーロッパ全土はもちろん、中東やアフリカへのアクセスも容易なハブであり、彼のグローバルな活動を物理的に支える理想的な場所です。何よりも、歴史的な音楽家たちの魂が息づくこの街に身を置くことで、彼はヨーロッパの音楽シーンの最前線に常に関与し続けるという、強い意志を示したのです。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 64, country: "Japan", city: "Tokyo", lat: 35.6895, lon: 139.6917, year: 2003, category: "教育", title: "未来への布石：教員免許状の取得", story: "国際的な演奏活動で多忙を極める中、彼は中学校および高等学校の音楽教諭一種免許状を取得します。これは、彼のキャリアが単なる演奏家にとどまらない、より広い視野に基づいていることを示す初期の重要な証拠です。将来、教育者として次世代の育成に関わることを見据えていたのかもしれませんし、あるいは音楽というものを体系的に教える能力を公的に証明したいという、彼の知的な探求心の表れだったのかもしれません。この資格は、後の教育活動やマスタークラスの指導において、彼の言葉にさらなる説得力と深みを与えることになります。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 8, country: "Japan", city: "Aichi", lat: 35.1815, lon: 136.9066, year: 2005, category: "演奏活動", title: "万博での演奏：愛・地球博", story: "2005年に開催された「愛・地球博」の公式文化事業である武豊春の国際音楽祭'05に出演。これは、単なるコンサートではなく、世界中から人々が集う国際的な舞台で、日本の芸術文化の高さをアピールする絶好の機会でした。彼は国籍や文化の異なる聴衆を前に、言葉を超えて共感を呼ぶ音楽の力を披露。彼のグローバルなアーティストとしての存在感を、改めて日本国内でも強く印象づけることになりました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 9, country: "Ukraine", city: "Kyiv", lat: 50.4501, lon: 30.5234, year: 2005, category: "演奏活動", title: "キエフ・フィルとの共演：東欧への扉", story: "彼の芸術的な探求は、西ヨーロッパの主要都市だけでなく、音楽の豊かな土壌を持つ東ヨーロッパにも向けられました。ウクライナの名門、キエフ国立フィルハーモニー交響楽団との共演は、その象徴的な出来事です。この共演はライヴ録音としてCD化もされ、彼のダイナミックかつ情熱的な演奏スタイルと、東欧のオーケストラが持つ重厚な響きが見事に融合した記録となりました。この成功は、彼が異なる文化的背景を持つ音楽家たちと即座に魂の対話を交わせる、稀有なコミュニケーション能力を持つことを証明しました。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 65, country: "Austria", city: "St. Pölten", lat: 48.2047, lon: 15.625, year: 2006, category: "演奏活動", title: "文化の交差点：オーストリア Ost-West Musikfestival", story: "「東西音楽祭」の名を冠したこのフェスティバルへの参加は、彼のキャリアを象徴する活動の一つです。オーストリアの地で、彼は文字通り東洋と西洋の音楽文化の架け橋となりました。様々な文化的背景を持つ音楽家たちとの共演を通じて、彼は互いの伝統を尊重しながらも、そこに新たな化学反応を生み出すことを試みました。これは、彼の音楽が単なる自己表現に留まらず、常に他者との対話、異文化とのコミュニケーションを志向していることを示しています。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 66, country: "Japan", city: "Tokyo", lat: 35.6812, lon: 139.7671, year: 2007, category: "演奏活動", title: "初のライブ盤リリース：キエフ・フィルとの共演盤", story: "ウクライナでのキエフ国立フィルハーモニー交響楽団との情熱的な共演が、『碓井俊樹ライヴアルバム』としてCD化され、リリースされました。これは彼のキャリアにおいて初めてのライヴ録音盤であり、一回性の芸術である演奏会の熱気、緊張感、そして聴衆との一体感を余すところなく捉えています。彼の演奏のダイナミズムと、オーケストラとのスリリングな応酬は多くのクラシックファンに衝撃を与え、演奏家・碓井俊樹の名をさらに広く知らしめることになりました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 45, "country": "Bahrain", "city": "Manama", "lat": 26.2285, "lon": 50.5860, "year": 2008, "category": "教育", "title": "中東の音楽教育：バーレーン国立音楽院マスタークラス", "story": "彼の教育への情熱は、ヨーロッパの伝統的な音楽院に留まりません。ペルシャ湾に浮かぶ島国バーレーンに赴き、国立音楽院でマスタークラスを実施しました。当時、この地域における西洋クラシック音楽の教育はまだ発展途上であり、彼の訪問は現地の若き音楽家たちにとって、世界トップレベルの指導に触れる貴重な機会となりました。急速な経済発展を遂げる中東地域にクラシック音楽の種を蒔き、文化の多様性と国際交流に貢献するという、彼の先駆的なビジョンが示された活動です。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", "video_id": null },
+    { id: 67, country: "USA", city: "New York", lat: 40.7128, lon: -74.0060, year: 2008, category: "演奏活動", title: "盟友との軌跡：ヴァイオリニスト岩崎潤との共演", story: "この頃から、ヴァイオリニストのレイ・イワズミ（岩崎潤）氏との共演活動が本格化します。特にブラームスのヴァイオリンソナタ全曲演奏は、彼らのライフワークの一つとなり、世界各地で絶賛を博しました。単なる共演者ではなく、互いの音楽的魂を深く理解し合うパートナーとして、室内楽の尽きない魅力を探求し続けました。これらの活動は、ソリストとしてだけでなく、他者と緻密に呼吸を合わせる室内楽奏者としての彼の卓越した能力をも示しています。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": "bL2h9xF0et4" },
+    { id: 69, country: "Japan", city: "Tokyo", lat: 35.670, lon: 139.764, year: 2008, category: "演奏活動", title: "紀尾井ホールでの挑戦：アクロス・ザ・ワールドI", story: "自身の名を冠したリサイタルシリーズ「アクロス・ザ・ワールド」を、日本屈指の音響を誇る紀尾井ホールで始動。これは、彼のグローバルな活動の成果を日本の聴衆に披露する、決意表明とも言えるコンサートでした。世界各地で得たインスピレーションを昇華させたプログラムは、単なる名曲の演奏会ではなく、聴衆を音楽による世界旅行へと誘う、彼ならではの独創的な体験を創出しました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 70, country: "Japan", city: "Nagoya", lat: 35.1709, lon: 136.8815, year: 2008, category: "演奏活動", title: "名手との対話：清水高師とのデュオ", story: "日本を代表するヴァイオリニストの一人、清水高師氏とのデュオコンサートを開催。異なる個性とキャリアを持つ二人の名手が、ステージ上で火花を散らし、そして時に寄り添いながら、室内楽の醍醐味を聴衆に届けました。特に、名古屋という東京以外の主要都市でこうした高品質な室内楽シリーズを展開したことは、日本の音楽文化の活性化に大きく貢献しました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 71, country: "Japan", city: "Yokohama", lat: 35.4437, lon: 139.6380, year: 2009, category: "組織運営", title: "トマトフィルの進化：横浜シンフォニエッタへの序章", story: "この年、山田和樹氏と碓井氏が中心となって活動してきた「トマトフィルハーモニー管弦楽団」は、大きな転換期を迎えます。プロフェッショナルなオーケストラとして本格的に活動していくため、横浜に拠点を移し、「横浜シンフォニエッタ」へと発展的に改称。これは、単なる名前の変更ではなく、学生の自主活動からプロの音楽団体へと脱皮する、強い決意の表れでした。この変革の中心に、碓井氏の経営者として、そしてプロデューサーとしての才能がありました。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 72, country: "Germany", city: "Bremen", lat: 53.0793, lon: 8.8017, year: 2010, category: "演奏活動", title: "ドイツでの録音：ブレーメン放送ホール『アクロス・ザ・ワールドII』", story: "リサイタルシリーズの第2弾は、その音響の良さで世界的に知られるドイツ・ブレーメンの放送ホールで録音されました。これは、彼の芸術がライヴ演奏だけでなく、録音作品としても最高水準にあることを証明する試みでした。ヨーロッパの音楽文化の中心地で、自身の芸術を後世に残る形で記録したこのプロジェクトは、彼のキャリアにおける重要な布石となりました。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 10, country: "Japan", city: "Yokohama", lat: 35.4437, lon: 139.6380, year: 2010, category: "組織運営", title: "アーティストCEOの船出：横浜シンフォニエッタ設立", story: "指揮者の山田和樹が藝大時代に結成した学生オケ「トマトフィル」を、プロの室内オーケストラ「横浜シンフォニエッタ」として発展させ、一般社団法人化。演奏家でありながら代表理事/ゼネラル・マネージャーとして経営の全てを担い、この若い楽団を世界的なレベルにまで引き上げた。自ら演奏の場を創造し、持続可能な芸術活動のモデルを構築するという、彼の起業家としての一面が完全に開花した瞬間でした。経済書を読み漁り、ビジネスの手法を芸術運営に応用するその姿は、まさに「アーティストCEO」の先駆けと言えるでしょう。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 30, country: "Tunisia", city: "Tunis", lat: 36.8065, lon: 10.1815, year: 2010, category: "教育", title: "アラブの春の前に：チュニス国立音楽院マスタークラス", story: "「アラブの春」と呼ばれる歴史的な変革の直前、彼はチュニジアの首都チュニスにいました。国立音楽院の若き才能たちにマスタークラスを行うためです。当時の北アフリカには、社会変革へのエネルギーと、未来への希望と不安が渦巻いていました。そんな激動の時代を目前にした若者たちと音楽を通じて対話し、技術だけでなく、音楽家としていかに生きるべきかを伝えた経験は、彼にとっても忘れがたいものとなりました。芸術が、時代のうねりの中で生きる人々の精神的な支えとなりうることを、彼は肌で感じたのです。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", "video_id": null },
+    { id: 68, country: "Switzerland", city: "Geneva", lat: 46.2044, lon: 6.1432, year: 2011, category: "演奏活動", title: "伝説のヴァイオリニストと：ピエール・アモイヤルとのデュオ", story: "20世紀を代表する伝説的なヴァイオリニストの一人、ピエール・アモイヤル氏とデュオ・リサイタルを開催。これは、若きマエストロが、歴史を創り上げてきた巨匠と対等に渡り合い、その音楽的対話が聴衆の前で繰り広げられた、極めて重要な出来事でした。世代を超えて受け継れる音楽の精神を、彼はアモイヤル氏との共演を通じて体感し、自らの芸術をさらに高い次元へと昇華させました。この共演は、彼のピアニストとしての評価を不動のものとする、大きな一歩となりました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 11, country: "USA", city: "New York", lat: 40.7128, lon: -74.0060, year: 2011, category: "演奏活動", title: "世界の中心へ：N.Y.リンカーン・センターデビュー", story: "世界の芸術の中心地、ニューヨークのリンカーン・センターでリサイタルを開催。この舞台に立つことは、多くの音楽家にとって夢であり、彼のキャリアにおける一つの頂点でした。満場の聴衆から送られたスタンディングオベーションは、彼の芸術が人種や文化を超えて世界中の人々の心を動かす、普遍的な力を持っていることの何よりの証明です。この成功は、彼にさらなる自信を与え、グローバルな活動を加速させる大きな推進力となりました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 73, country: "Algeria", city: "Algiers", lat: 36.7763, lon: 3.0589, year: 2011, category: "文化交流・社会貢献", title: "アルジェリアとの出会い：国際交響楽フェスティバル", story: "後に外務大臣表彰を受けるきっかけとなる、アルジェリアとの深い関係はこの頃から始まります。首都アルジェで開催された国際交響楽フェスティバルに招聘され、演奏を披露。これが、彼と北アフリカのこの国との、音楽を通じた長い友好の始まりでした。現地の音楽家や聴衆との温かい交流は、彼の心に深く刻まれ、この国への文化的な貢献を続ける原動力となりました。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 74, country: "Japan", city: "Nagoya", lat: 35.1709, lon: 136.8815, year: 2011, category: "教育", title: "コンクール前夜祭：宗次エンジェルヴァイオリンコンクール", story: "ヴァイオリン界の巨匠シュロモ・ミンツやフェリックス・アーヨといった伝説的な音楽家たちと共に、名古屋で開催された「宗次エンジェルヴァイオリンコンクール」の審査員としてガラ・コンサートに出演。次世代の才能を発掘するコンクールの舞台裏で、彼は審査員として、そして共演者として、若い音楽家たちを温かく、そして厳しく見守りました。トップレベルの演奏家が集う華やかな舞台で、彼は次世代へのバトンを渡す重要な役割を担いました。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 12, country: "Hong Kong", city: "Hong Kong", lat: 22.3193, lon: 114.1694, year: 2012, category: "組織運営", title: "アジアの架け橋：日本香港音楽協会設立", story: "彼のビジョンは、自身の演奏活動だけに留まりません。アジア全体の音楽文化の発展を見据え、香港政府の公認を受け「日本香港音楽協会」を設立し、理事長に就任しました。この協会を通じて、彼は日本と香港の若手音楽家の交流を促進し、国際音楽コンクールを運営するなど、次世代が羽ばたくためのプラットフォームを創造しました。芸術家と経営者、二つの顔を持つ彼ならではの、スケールの大きな社会貢献活動です。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 28, country: "USA", city: "Hartford", lat: 41.7658, lon: -72.6734, year: 2012, category: "教育", title: "次世代の発掘：ショパン国際ピアノコンクール審査員", story: "アメリカ・ハートフォードで開催されるショパン国際ピアノコンクールの審査員を務める。ピアニストとして世界の頂点を目指すだけでなく、自身の経験を次世代に還元し、新たな才能を発掘することにも情熱を注いでいます。彼の審査は、単なる技術的な評価に留まらず、演奏家の個性や将来性を見抜く、深い洞察力に満ちていました。教育者・指導者としての彼の重要な一面を示す活動です。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", "video_id": null },
+    { id: 75, country: "Japan", city: "Saitama", lat: 35.8617, lon: 139.6455, year: 2012, category: "教育", title: "教育者としての第一歩：尚美学園大学客員准教授就任", story: "彼の教育への情熱が、具体的な形で結実します。尚美学園大学および大学院の客員准教授に就任し、本格的に日本の音楽大学で教鞭を執り始めました。世界を舞台に活躍する現役の演奏家から直接指導を受けられることは、学生たちにとって計り知れない価値がありました。彼は自身の経験を通じて、技術だけでなく、プロの音楽家として生きるための哲学や心構えを伝え、多くの後進を育て始めます。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 54, country: "Japan", city: "Osaka", lat: 34.6937, lon: 135.5023, year: 2012, category: "組織運営", title: "音楽振興への貢献：大阪国際音楽振興会実行委員", story: "西日本の音楽文化の中心地である大阪で、国際音楽振興会の実行委員を務めます。これは、横浜シンフォニエッタの運営で培った経営手腕と、音楽家としての広い人脈が評価されたものです。コンクールの運営などを通じて、彼は地域の音楽文化の発展と、若手音楽家の育成に貢献しました。彼の活動は、常に一つの拠点に留まらず、日本の音楽界全体を活性化させることを目指しています。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 13, country: "France", city: "Nantes", lat: 47.2184, lon: -1.5536, year: 2013, category: "演奏活動", title: "熱狂の音楽祭：ラ・フォル・ジュルネ出演", story: "世界最大級のクラシック音楽祭「ラ・フォル・ジュルネ」に、自ら率いる横浜シンフォニエッタと共に出演。この音楽祭は、クラシック音楽の新しい楽しみ方を提案し、幅広い聴衆に開かれていることで知られています。彼はここで、革新的かつ極めて質の高い演奏を披露し、多くの聴衆を熱狂させました。彼の音楽が、伝統を重んじながらも、常に現代の聴衆と繋がろうとするオープンな精神を持っていることを象徴する出来事でした。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 14, country: "Japan", city: "Yokohama", lat: 35.4545, lon: 139.6322, year: 2013, category: "受賞・表彰", title: "横浜の誇り：横浜文化賞 文化・芸術奨励賞受賞", story: "横浜シンフォニエッタを設立し、横浜の地から世界へ向けて独創的な音楽を発信し続ける功績が認められ、横浜市から最も栄誉ある文化賞の一つである「横浜文化賞 文化・芸術奨励賞」を授与されました。世界を飛び回る「空飛ぶピアニスト」であると同時に、一つの地域に深く根ざし、その文化を豊かにする彼の活動が高く評価された証です。彼にとって、活動の拠点であるコミュニティからの評価は、特別な意味を持つものでした。", "image_url": "https://i.ibb.co/pnvXG3Q/award.jpg", "video_id": null },
+    { id: 29, country: "India", city: "New Delhi", lat: 28.6139, lon: 77.2090, year: 2013, category: "演奏活動", title: "インドとの対話：ニューデリーでのリサイタル", story: "急速な経済成長を遂げる大国インドの首都でリサイタルを開催。これは、西洋のクラシック音楽と、深く豊かな歴史を持つインドの伝統文化との、刺激的な出会いの場となりました。彼は音楽を通じて異文化間の対話を試み、新たな聴衆を開拓しました。彼のグローバルな活動は、常に未知なるものへの好奇心と、相互理解への強い願いに貫かれています。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 43, country: "Japan", city: "Tokyo", lat: 35.6812, lon: 139.7671, year: 2013, category: "文化交流・社会貢献", title: "音楽による社会貢献：Classic for Japan評議員就任", story: "東日本大震災をきっかけに、音楽を通じて被災地支援や社会貢献活動を行うために設立された財団法人「Classic for Japan」の評議員に就任。これは、彼の社会的な問題に対する強い意識と、音楽家として社会に何ができるかを常に問い続ける姿勢の表れです。単に演奏するだけでなく、芸術が持つ力を社会のポジティブな変化のために活用しようとする、彼の哲学が具体化した活動と言えるでしょう。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 76, country: "Japan", city: "Tokyo", lat: 35.7171, lon: 139.770, year: 2013, category: "教育", title: "知の探求：東京大学五月祭でのシンポジウム", story: "彼の知的好奇心は、音楽の世界だけに留まりません。日本最高峰の知性が集う東京大学の五月祭で、「休学を考える」というテーマの公開シンポジウムに登壇。自身の経験を元に、既存のキャリアパスから外れることの価値や、戦略的な人生設計について学生たちと議論を交わしました。音楽家という枠を超え、現代を生きる一人の思想家、そして若者たちのメンターとしての一面を垣間見せた瞬間でした。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 77, country: "Japan", city: "Miyagi", lat: 38.2682, lon: 140.8694, year: 2013, category: "文化交流・社会貢献", title: "震災復興の祈り：津波ヴァイオリンとの共演", story: "東日本大震災の津波で流された木材から作られ、人々の想いを乗せて世界中を旅する「津波ヴァイオリン」。彼はこの特別なヴァイオリンと共演し、鎮魂と復興への祈りを込めた演奏を捧げました。音楽が、悲しみを乗り越え、人々の心を繋ぎ、未来への希望を紡ぐ力を持つことを改めて示した、深く感動的なコンサートでした。彼の芸術が、常に社会の痛みや喜びに寄り添っていることを象徴しています。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 15, country: "Antarctica", city: "Antarctic Peninsula", lat: -64.7747, lon: -62.6373, year: 2014, category: "演奏活動", title: "第七大陸への探求：南極での演奏", story: "彼の冒険心は、ついに人類の活動の最前線、南極大陸へと向かいます。第七大陸に到達し、その壮大で荘厳な氷の世界の中でピアノを演奏するという、前代未聞のプロジェクトを敢行。これは単なるパフォーマンスではありません。極限の自然環境の中で、芸術が人間にとって何を意味するのかを問う、深く哲学的な旅でした。彼の奏でる音は、人類の文明と、手つかずの自然との対話そのものであり、芸術の普遍的な力を最も雄弁に証明した瞬間でした。", "image_url": "https://i.ibb.co/3kC9s7B/antarctica.jpg", "video_id": null },
+    { id: 56, country: "Finland", city: "Helsinki", lat: 60.1699, lon: 24.9384, year: 2014, category: "演奏活動", title: "シベリウスの森で：フィンランド大使館コンサート", story: "森と湖の国フィンランドの日本大使館で、親密な雰囲気のプライベートコンサートを開催。20世紀の巨匠ジャン・シベリウスの音楽が生まれた国の、静謐で透明な空気の中で、彼のピアノは特別な響きを奏でました。北欧デザインの洗練された空間と、彼の緻密で色彩豊かな音楽が見事に融合し、出席した聴衆に忘れがたい芸術体験を提供しました。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 78, country: "Japan", city: "Tokyo", lat: 35.728, lon: 139.719, year: 2014, category: "教育", title: "音楽家のキャリアを語る：東京音楽大学特別講義", story: "母校の一つである東京音楽大学で、「ピアニストって面白い！」と題した特別講義を実施。これは、彼が後進の育成に並々ならぬ情熱を注いでいることの証です。自身の波乱万丈なキャリアをユーモアたっぷりに語りながら、音楽家として世界で生き抜くための実践的な知恵や、芸術家としての心の持ちようを学生たちに伝えました。彼の講義は、多くの学生にとって、自らの将来を考える上で大きな刺激となりました。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 80, country: "Japan", city: "Tokyo", lat: 35.720, lon: 139.715, year: 2014, category: "文化交流・社会貢献", title: "ベートーヴェン国際ピアノコンクールアジア実行委員長", story: "アジア地域における若手ピアニストの育成と、ベートーヴェンの音楽の普及を目的としたこのコンクールで、彼は実行委員長という重責を担います。これは、彼の組織運営能力、教育への情熱、そしてクラシック音楽の王道に対する深い理解が、総合的に評価された結果です。彼はコンクールを通じて、アジアの若者たちに高い目標と挑戦の場を提供し、地域の音楽レベルの向上に大きく貢献しました。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 81, country: "Bulgaria", city: "Sofia", lat: 42.6977, lon: 23.3219, year: 2014, category: "演奏活動", title: "ソフィアでの共演：ウィーン・オルフェウス室内合奏団", story: "ブルガリアの首都ソフィアで、ウィーンを拠点とする名門、オルフェウス室内合奏団と共演。オーストリアの洗練されたアンサンブルと、彼の情熱的なピアノが見事に融合し、東欧の聴衆を魅了しました。ウィーンに拠点を置く彼ならではの、質の高い国際的なコラボレーションの一つです。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 82, country: "Japan", city: "Fukushima", lat: 37.75, lon: 140.467, year: 2015, category: "文化交流・社会貢献", title: "地域の音楽祭を牽引：野口英世記念ばんだい高原国際音楽祭", story: "世界の偉人、野口英世の故郷で開催されるこの国際音楽祭に深く関わり、地域の文化振興に貢献。世界的な演奏家を招聘する一方で、自身も様々な形で演奏会を行い、音楽祭を盛り上げました。彼の活動は、常にグローバルな視点と、ローカルなコミュニティへの愛情の両方に基づいています。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 79, country: "Japan", city: "Nagoya", lat: 35.1709, lon: 136.8815, year: 2015, category: "教育", title: "コンクール審査委員長としての重責：宗次エンジェルヴァイオリンコンクール", story: "若手ヴァイオリニストの登竜門として評価の高いこのコンクールで、彼はついに審査委員長という大役を務めます。これは、彼の音楽家としての実績はもちろん、公正な判断力と次世代の才能を見抜く確かな目が、音楽界全体から深く信頼されていることの証明です。彼はコンクールのレベルを高く保ちながらも、若い挑戦者たちを温かく励まし、コンクールが単なる競争の場でなく、成長の場となるよう心を配りました。", image_url: "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 31, country: "Cambodia", city: "Phnom Penh", lat: 11.5564, lon: 104.9282, year: 2015, category: "演奏活動", title: "カンボジアとの協奏：友好60周年記念オペラガラ", story: "日本とカンボジアの友好60周年を記念するオペラガラに出演。内戦の悲劇を乗り越え、文化復興を目指すカンボジアで、音楽が平和と友好の象徴となる瞬間を創り出しました。彼の演奏は、両国の未来への希望を奏でる、力強いメッセージとなりました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 35, country: "South Korea", city: "Tongyeong", lat: 34.8456, lon: 128.4330, year: 2015, category: "演奏活動", title: "韓国・統営国際音楽祭への出演", story: "アジアを代表する現代音楽の祭典、統営（トンヨン）国際音楽祭に横浜シンフォニエッタと共に出演。日韓の音楽家が協力し、最高水準の演奏を披露することで、芸術における国境のない連帯を示しました。政治的に困難な関係にある両国だからこそ、こうした文化交流の持つ意味は計り知れません。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 83, country: "Japan", city: "Tokyo", lat: 35.728, lon: 139.719, year: 2015, category: "教育", title: "母校への貢献：上野学園大学客員教授就任", story: "尚美学園大学に続き、自身の音楽的ルーツの一つである上野学園大学からも客員教授として招聘されます。これは、彼の教育者としての評価がますます高まっていることの証です。彼は自身のグローバルな経験を、日本の音楽教育の現場に還元することに、大きな喜びと責任を感じていました。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", video_id: null },
+    { id: 16, country: "Japan", city: "Tokyo", lat: 35.6895, lon: 139.6917, year: 2016, category: "演奏活動", title: "ジャンルの越境：プログレッシブ・ピアノ・ボックス", story: "アルバム『TOSHIKI USUI PROGRESSIVE PIANO BOX』をリリース。ピンク・フロイドの「クレイジー・ダイアモンド」や、イタリアのプログレバンド、ゴブリンの「サスペリア」といったロック史に残る名曲を、超絶技巧のピアノ独奏用に編曲し演奏。クラシックのピアニストがロックを弾くというレベルではなく、原曲への深いリスペクトと理解に基づいた、全く新しい芸術作品として昇華させました。彼の音楽的ルーツの多様性と、ジャンルの壁を無意味化する彼の自由な精神を象徴する作品です。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 46, "country": "Iceland", "city": "Reykjavik", "lat": 64.1466, "lon": -21.9426, "year": 2016, "category": "演奏活動", "title": "氷と火の国の響き：アイスランドでの演奏", "story": "北極圏に位置するアイスランドで演奏。壮大な自然が創り出す独特の雰囲気の中で、彼のピアノは自然と人間、そして音楽との根源的な関係性を探求するような響きを奏でました。彼の旅は、常に新しい風景や文化との出会いを求め、それが彼の芸術を豊かにし続けています。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 55, country: "United Kingdom", city: "London", lat: 51.5074, lon: -0.1278, year: 2016, category: "演奏活動", title: "音楽の都ロンドンへ：英国でのリサイタル", story: "世界中の音楽家が集まるロンドンでリサイタルを開催。伝統と革新が共存するこの街で、彼の多彩なレパートリーと表現力は高く評価され、英国の聴衆に強い印象を残しました。彼の芸術が、世界のどの主要都市においても通用する普遍性を持っていることを改めて証明しました。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 85, country: "Palestine", city: "Ramallah", lat: 31.907, lon: 35.203, year: 2016, category: "文化交流・社会貢献", title: "パレスチナとの連帯：『WE ARE TOMODACHI』", story: "複雑な政治情勢下にあるパレスチナで、「私たちは友達だ」という力強いメッセージを掲げた文化交流コンサートに出演。音楽が、対立や憎悪の連鎖を断ち切り、人々の間に共感と連帯を生み出す力を持つことを、彼は身をもって示しました。これは、彼の芸術家としての勇気と、平和への強い願いが結実した、極めて意義深い活動です。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 17, country: "Russia", city: "Moscow", lat: 55.7558, lon: 37.6173, year: 2017, category: "演奏活動", title: "ロシアとの邂逅：ロストロポーヴィチ国際音楽祭", story: "チェロの巨匠の名を冠したモスクワの音楽祭に、横浜シンフォニエッタと共に出演。ロシア国立フィルハーモニーとも共演し、音楽大国ロシアの聴衆から喝采を浴びた。これは楽団にとって大きなマイルストーンであり、彼のリーダーシップの賜物でもある。西側諸国との関係が複雑な時期に、芸術を通じて友好の橋を架けるという、文化外交の真髄を示しました。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": null },
+    { id: 18, country: "Algeria", city: "Algiers", lat: 36.7763, lon: 3.0589, year: 2017, category: "受賞・表彰", title: "文化外交官の誕生：外務大臣表彰", story: "彼のピアノは、国境を越える外交のパスポートとなります。長年にわたる日本とアルジェリアの文化交流への貢献が認められ、平成29年度外務大臣表彰を受賞。これは、一人の音楽家の地道な活動が、国家間の友好関係の構築に大きな役割を果たしたことが、日本政府によって公に認められた輝かしい瞬間でした。", "image_url": "https://i.ibb.co/xJt1Y5Y/gaimu.jpg", "video_id": null },
+    { id: 84, country: "Japan", city: "Tokyo", lat: 35.6812, lon: 139.7671, year: 2017, category: "組織運営", title: "新たな組織の創設：MUSIC DESIGN CEO就任", story: "横浜シンフォニエッタの成功に留まらず、彼はさらに活動の幅を広げます。新たに「合同会社 MUSIC DESIGN」を設立し、CEOに就任。これは、オーケストラ運営だけでなく、コンサートの企画、アーティストのマネジメント、さらには音楽祭のプロデュースまで、音楽に関わるあらゆる事象をデザインするという、彼の野心的なビジョンを体現するものです。彼の経営者としての才能が、さらに大きく開花したことを示しています。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 86, country: "Japan", city: "Niigata", lat: 37.9161, lon: 139.0364, year: 2017, category: "組織運営", title: "音楽祭への新たな関与：朱鷺音楽祭 音楽監督", story: "新潟県で開催される「朱鷺音楽祭」の音楽監督に就任。これは、彼が単なる演奏家としてだけでなく、音楽祭全体のコンセプトを創り上げ、プログラムを構成し、アーティストを招聘する、総合的なプロデューサーとしての能力を高く評価されたことを意味します。地域の文化資源と国際的なネットワークを結びつけ、魅力的な音楽祭を創造するという、新たな挑戦が始まりました。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 19, country: "Venezuela", city: "Caracas", lat: 10.4806, lon: -66.9036, year: 2018, category: "文化交流・社会貢献", title: "南米との共鳴：シモン・ボリバル・オーケストラとの共演", story: "音楽による社会変革の象徴「エル・システマ」が生まれた地、ベネズエラへ。そのエル・システマから生まれた世界的なオーケストラと共演し、音楽が持つ、若者たちの人生を変え社会を動かす力を肌で感じ、深い感銘を受けた。この経験は、後に彼が日本の「エルシステマコネクト」の理事に就任する大きなきっかけとなりました。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": "GhjFBR7eSbA" },
+    { id: 20, country: "Japan", city: "Koriyama", lat: 37.4000, lon: 140.3833, year: 2018, category: "演奏活動", title: "驚異の探求心：スカルラッティ・ソナタ100曲マラソン", story: "福島県郡山市で、前代未聞の偉業に挑む。1日でスカルラッティのソナタ100曲を演奏するマラソンコンサートだ。これは単なる体力的な挑戦ではない。一つのテーマを徹底的に掘り下げる、彼の音楽に対する底知れぬ探求心と知的好奇心の表れだった。このコンサートを通じて、彼は忘れられがちなバロックの傑作に新たな光を当て、その魅力を多くの人々に伝えました。", "image_url": "https://i.ibb.co/8mj3g3f/performance.jpg", "video_id": "99K50QyaNSM" },
+    { id: 38, country: "USA", city: "Boston", lat: 42.3601, lon: -71.0589, year: 2018, category: "教育", title: "知性の交差点：タフツ大学での演奏会", story: "アメリカ東海岸の名門、タフツ大学で演奏会を開催。学問の最高府で、知的好奇心旺盛な学生や研究者たちと音楽を通じて交流。芸術と知性が交差する刺激的な空間を創り出した。彼の音楽が、アカデミックな環境においても深く理解され、評価されていることを示す出来事です。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", "video_id": null },
+    { id: 42, country: "Vietnam", city: "Hanoi", lat: 21.0278, lon: 105.8342, year: 2018, category: "文化交流・社会貢献", title: "皇室外交の舞台で：天皇皇后両陛下ご臨席のレセプション", story: "日本とベトナムの外交関係樹立45周年を記念するレセプションで、天皇皇后両陛下（当時）とベトナム国家主席ご夫妻ご臨席のもと、横浜シンフォニエッタを指揮。音楽が国家間の最高レベルの友好を彩る、歴史的な瞬間に立ち会った。彼のキャリアの中でも、特に名誉ある一場面です。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 21, country: "Japan", city: "Tokyo", lat: 35.6762, lon: 139.7307, year: 2019, category: "組織運営", title: "音楽で未来を育む：エルシステマコネクト理事就任", story: "ベネズエラでの共演で音楽教育の力に感銘を受け、日本版エル・システマである「エルシステマコネクト」の理事に就任。自身の経験を活かし、日本の子供たちに音楽を通じて生きる力を与える活動に、より深くコミットしていく。彼の社会貢献活動が、新たなステージへと進んだことを示しています。", "image_url": "https://i.ibb.co/yN0m4sQ/management.jpg", "video_id": null },
+    { id: 22, country: "Georgia", city: "Signagi", lat: 41.6167, lon: 45.9167, year: 2019, category: "受賞・表彰", title: "魂の継承：ジョージアとの絆と名誉市民の称号", story: "ジョージアの作曲家、故ヴァジャ・アザラシヴィリの音楽に魅了され、その作品を世界に紹介し続けた。長年の功績が称えられ、アザラシヴィリの故郷である「愛の街」シグナギから日本人初の名誉市民の称号を贈られた。単なる演奏家としてではなく、一人の作曲家の音楽遺産を守り、未来へと繋ぐ守護者としての役割も担うことになりました。", "image_url": "https://i.ibb.co/7C9HnC1/azarashvili.jpg", "video_id": null },
+    { id: 23, country: "Japan", city: "Toyooka", lat: 35.5422, lon: 134.8194, year: 2019, category: "組織運営", title: "地域に根差す芸術祭：「おんぷの祭典」音楽監督", story: "世界を飛び回る「空飛ぶピアニスト」であると同時に、日本の地域社会に深く根差した活動にも情熱を注ぐ。兵庫県豊岡市で開催される「おんぷの祭典」の音楽監督に就任し、地域住民を巻き込みながら、質の高い音楽を届ける新しい形の音楽祭を作り上げている。グローバルとローカル、両方の視点を持つ彼ならではの活動です。", "image_url": "https://i.ibb.co/yN0m4sQ/management.jpg", "video_id": null },
+    { id: 24, country: "Japan", city: "Fukushima", lat: 37.4239, lon: 140.1558, year: 2019, category: "文化交流・社会貢献", title: "音楽を日常へ：阿武隈急行・列車内コンサート", story: "「音楽はコンサートホールの中だけにあるものではない」という信念を体現。鉄道好きが高じ、福島県のローカル線・阿武隈急行の車内でコンサートを敢行。わずか2日前の連絡で実現させ、乗客を驚かせ、楽しませた。彼の行動力と遊び心、そして人々を楽しませたいという純粋な気持ちが結集した、伝説的なイベントです。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 47, "country": "USA", "city": "Los Angeles", "lat": 34.0522, "lon": -118.2437, "year": 2019, "category": "文化交流・社会貢献", "title": "LA日本祭：ロサンゼルスでの文化発信", "story": "世界最大級の日本人コミュニティを持つロサンゼルスで開催された「日本祭」に出演。現地の日本人や日系人、そして日本文化に興味を持つ多くの人々に、日本の現代的なクラシック音楽の魅力を伝えました。彼の活動は、日本の文化を世界に発信する上で、重要な役割を担っています。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 33, country: "China", city: "Beijing", lat: 39.9042, lon: 116.4074, year: 2019, category: "文化交流・社会貢献", title: "北京での文化交流：在中国日本国大使館主催音楽会", story: "政治的に複雑な関係にある大国中国で、文化交流の架け橋となる。日本大使館主催の音楽会で演奏し、音楽という共通言語を通じて相互理解を深めることの重要性をアピールした。彼の活動は、常に国家間の対話を促進することを目指しています。", image_url: "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", video_id: null },
+    { id: 39, country: "Lebanon", city: "Beirut", lat: 33.8938, lon: 35.5018, year: 2020, category: "文化交流・社会貢献", title: "困難の中の希望：レバノンでの春のコンサート", story: "経済危機や政情不安、そしてコロナ禍という三重苦に揺れるレバノンで開催された在レバノン日本大使公邸でのコンサートに出演。困難な状況にある人々の心に、音楽を通じてひとときの安らぎと希望を届けました。芸術は、平時だけでなく、危機的な状況においてこそ、その真価を発揮するという彼の信念を示す活動でした。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 25, country: "Japan", city: "Yamaguchi", lat: 34.1859, lon: 131.4706, year: 2020, category: "受賞・表彰", title: "自由な魂の証し：種田山頭火賞受賞", story: "「うしろすがたの しぐれてゆくか」。放浪の俳人、種田山頭火の名を冠したこの賞は、既成概念にとらわれず自由な表現を追求する芸術家に贈られます。世界を旅し、ジャンルを越境し、常に新しい表現を模索し続ける彼の生き様そのものが、山頭火の孤独を恐れない自由な精神と共鳴したのです。彼の芸術家としてのあり方が、社会的に高く評価されたことを示しています。", "image_url": "https://i.ibb.co/pnvXG3Q/award.jpg", "video_id": null },
+    { id: 87, country: "Japan", city: "Yokohama", lat: 35.4545, lon: 139.6322, year: 2020, category: "組織運営", title: "コロナ禍の挑戦：横浜シンフォニエッタ・フェスティバル", story: "新型コロナウイルスのパンデミックにより、世界の音楽界が沈黙を余儀なくされる中、彼は果敢な挑戦に打って出ます。徹底した感染対策のもと、横浜シンフォニエッタ・フェスティバルを敢行。ピアニストの藤田真央氏らと共演し、音楽の灯を絶やしてはならないという強いメッセージを発信しました。彼のリーダーシップと実行力が、困難な状況の中で際立った瞬間でした。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 26, country: "Japan", city: "Shiga", lat: 35.1554, lon: 136.0827, year: 2021, category: "組織運営", title: "新たな挑戦：近江シンフォニエッタGM就任", story: "横浜シンフォニエッタを成功に導いた経営手腕は、新たな挑戦の舞台を求めます。滋賀県を拠点とする「近江シンフォニエッタ」のゼネラルマネージャーに就任。再びゼロに近い状態からプロのオーケストラを育て上げ、地域文化の新たな核を創造するという、壮大なプロジェクトに乗り出しました。彼の情熱と経験が、日本の新たな地域に注がれることになります。", "image_url": "https://i.ibb.co/yN0m4sQ/management.jpg", "video_id": null },
+    { id: 27, country: "Japan", city: "Tokyo", lat: 35.6698, lon: 139.7723, year: 2021, category: "文化交流・社会貢献", title: "未来のオペラ：新国立劇場『SUPER ANGELS』", story: "AIと人間が共創する未来を描いた島田雅彦原作の新作オペラに、エルシステマコネクトの子どもたちと共に参加。最先端のテクノロジーと伝統的なオペラ、そして子どもたちの無垢な歌声が融合するこのプロジェクトは、芸術の新たな可能性を切り拓く画期的な試みでした。彼は常に、音楽の未来がどこへ向かうのかを見据えています。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 60, country: "Japan", city: "Tokyo", lat: 35.728, lon: 139.719, year: 2021, category: "教育", title: "母校への帰還：上野学園大学客員教授", story: "世界中を巡る壮大な旅を経て、彼の音楽的人生は一つの円環を閉じ、新たな始まりを迎えます。自身の音楽的ルーツの一つである上野学園大学に、客員教授として帰還したのです。これは単なる名誉職ではありません。世界を舞台に培った豊富な経験と独自の芸術哲学を、次代を担う若い音楽家たちに直接伝えるという、彼の教育者としての使命感の表れです。彼の旅は、未来へと続く新たな世代を育むことで、さらにその円環を広げていくのです。", "image_url": "https://i.ibb.co/L8y2hM7/education.jpg", "video_id": null },
+    { id: 34, country: "Japan", city: "Hakuba", lat: 36.6972, lon: 137.8617, year: 2022, category: "文化交流・社会貢献", title: "未来の聴衆へ：未就学児のためのコンサート", story: "「クラシックは堅苦しい」という常識を、彼は根本から覆します。長野県白馬村で、未就学児が泣いても騒いでも、ピアノの下に潜り込んでもOKなコンサートを開催。音楽の喜びを最も自由な形で次世代に伝える、彼の革新的な教育哲学がここにあります。未来の聴衆を育てることは、音楽文化の未来そのものを創ることだと、彼は信じています。", "image_url": "https://i.ibb.co/dG7C6Yd/social-contribution.jpg", "video_id": null },
+    { id: 88, country: "Japan", city: "Nagano", lat: 36.6485, lon: 138.195, year: 2022, category: "組織運営", title: "長野の芸術文化を振興：長野県芸術文化振興協会 音楽監督", story: "彼の地域文化への貢献は、さらに広がりを見せます。長野県全体の芸術文化を振興する協会の音楽監督に就任。一つの音楽祭だけでなく、県全体の音楽文化の発展に、より高い視点から関わることになりました。彼の持つ国際的なネットワークと、地域への深い理解が、長野県の文化を新たなステージへと導くことが期待されています。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null },
+    { id: 98, country: "Japan", city: "Yokohama", lat: 35.4545, lon: 139.6322, year: 2023, category: "演奏活動", title: "新たな響きの探求：テアトルフォンテでのリサイタル", story: "横浜市泉区民文化センター、テアトルフォンテのグランドピアノが新しい楽器に入れ替えられた際、そのお披露目コンサートの奏者として選ばれました。これは、彼の音色に対する鋭い感性と、楽器の持つポテンシャルを最大限に引き出す能力が、高く評価されていることの証です。彼は新しいピアノと対話し、その最初の「声」を聴衆に届けました。常に新しい響きを探求し続ける、彼の音楽家としての真摯な姿勢が表れています。", image_url: "https://i.ibb.co/8mj3g3f/performance.jpg", video_id: null },
+    { id: 99, country: "Georgia", city: "Tbilisi", lat: 41.7151, lon: 44.7837, year: 2024, category: "文化交流・社会貢献", title: "ジョージアとの深化：日本大使館開設15周年記念コンサート", story: "彼が深く敬愛する作曲家アザラシヴィリの故郷、ジョージアとの絆は、時を経てさらに深まります。首都トビリシでの日本大使館開設15周年という記念すべき演奏会に招聘され、日本の作品とジョージアの作品を織り交ぜたプログラムを演奏。これは、彼の長年にわたる両国の文化交流への貢献が結実した瞬間であり、音楽を通じて築かれた友好関係の象徴となりました。", image_url: "https://i.ibb.co/7C9HnC1/azarashvili.jpg", video_id: null },
+    { id: 100, country: "Japan", city: "Toyooka", lat: 35.5422, lon: 134.8194, year: 2024, category: "文化交流・社会貢献", title: "未来への響き：おんぷの祭典、そしてその先へ", story: "長年にわたり音楽監督として深く関わってきた兵庫県豊岡市の「おんぷの祭典」。この祭典は、単なる音楽イベントから、地域の子どもたちが世界と出会い、多様な価値観を学ぶための重要な教育プラットフォームへと進化を遂げました。彼にとって、この祭典は自身のキャリアの集大成の一つであり、音楽を通じて地域社会を豊かにし、次世代を育むという信念の結晶です。世界中を飛び回りながらも、日本の地域に深く根を下ろす。この両極を往復するダイナミズムこそが、碓井俊樹という芸術家の真骨頂であり、彼の旅はこれからも、世界と日本、そして未来へと続く新たな物語を紡ぎ続けるでしょう。", image_url: "https://i.ibb.co/yN0m4sQ/management.jpg", video_id: null }
+];
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            if (typeof allActivities === 'undefined' || allActivities.length === 0) {
+                document.getElementById('loader').innerHTML = '<h1>表示エラー</h1><p>活動データの読み込みに失敗しました。</p>';
+                return;
+            }
+            
+            const map = L.map('map', { center: [30, 30], zoom: 2.5, minZoom: 2 });
+            const markers = L.markerClusterGroup();
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+                attribution: '© OpenStreetMap contributors © CARTO', noWrap: true
+            }).addTo(map);
+
+            const infoPanel = document.getElementById('info-panel');
+            const activityList = document.getElementById('activity-list');
+            let currentActivity = null;
+
+            function openInfoPanel(activity) {
+                currentActivity = activity;
+                document.getElementById('info-panel-content').innerHTML = `
+                    <div class="info-panel-media">
+                        <img src="${activity.image_url}" alt="${activity.title}" onerror="this.style.display='none';">
+                    </div>
+                    <div class="info-panel-text">
+                        <h2 class="info-panel-title">${activity.title}</h2>
+                        <div class="info-panel-meta">
+                            <div><span class="meta-label">開催年:</span> ${activity.year}</div>
+                            <div><span class="meta-label">カテゴリー:</span> ${activity.category}</div>
+                            <div><span class="meta-label">場所:</span> ${activity.country}：${activity.city}</div>
+                        </div>
+                        <p class="info-panel-story">${activity.story}</p>
+                    </div>`;
+                infoPanel.classList.add('is-open');
+                updateActiveCard(activity.id);
+            }
+
+            function closeInfoPanel() {
+                infoPanel.classList.remove('is-open');
+                updateActiveCard(null);
+                currentActivity = null;
+            }
+
+            function updateActiveCard(activeId) {
+                document.querySelectorAll('.activity-card').forEach(c => {
+                    c.classList.toggle('active', c.dataset.id == activeId);
+                });
+            }
+
+            function navigateTo(activity) {
+                const targetLatLng = L.latLng(activity.lat, activity.lon);
+                
+                let panelOffset = [0, 0];
+                if (window.innerWidth > 768) {
+                    // Only apply offset if the panel is opening or changing
+                    if (!infoPanel.classList.contains('is-open') || (currentActivity && currentActivity.id !== activity.id)) {
+                        panelOffset[0] = -infoPanel.offsetWidth / 2;
+                    }
+                }
+                
+                const targetZoom = map.getZoom() < 8 ? 8 : map.getZoom();
+                map.flyTo(targetLatLng, targetZoom, { animate: true, duration: 1.2 });
+                
+                map.once('zoomend moveend', function() {
+                    if (panelOffset[0] !== 0) {
+                        map.panBy(panelOffset, { animate: true, duration: 0.5 });
+                        map.once('moveend', () => openInfoPanel(activity));
+                    } else {
+                        openInfoPanel(activity);
+                    }
+                });
+            }
+            
+            function populateListAndMap(activities) {
+                activityList.innerHTML = '';
+                markers.clearLayers();
+                activities.sort((a, b) => a.year - b.year || a.id - b.id).forEach(activity => {
+                    if (activity.lat && activity.lon) {
+                        const marker = L.marker([activity.lat, activity.lon]);
+                        marker.bindTooltip(`${activity.country}：${activity.city}`);
+                        marker.on('click', () => navigateTo(activity));
+                        markers.addLayer(marker);
+                    }
+
+                    const card = document.createElement('li');
+                    card.className = 'activity-card';
+                    card.dataset.id = activity.id;
+                    card.innerHTML = `<h3>${activity.title}</h3><div class="activity-card-meta"><span><i class="fa-solid fa-calendar-alt"></i> ${activity.year}</span><span><i class="fa-solid fa-tag"></i> ${activity.category}</span></div>`;
+                    card.onclick = () => navigateTo(activity);
+                    activityList.appendChild(card);
+                });
+                map.addLayer(markers);
+            }
+
+            const categories = ['すべて', ...new Set(allActivities.map(a => a.category))];
+            const filterContainer = document.getElementById('filter-buttons');
+            filterContainer.innerHTML = categories.map(category => 
+                `<button class="filter-btn ${category === 'すべて' ? 'active' : ''}" data-category="${category}">${category}</button>`
+            ).join('');
+
+            filterContainer.addEventListener('click', (e) => {
+                if (e.target.tagName === 'BUTTON') {
+                    if(filterContainer.querySelector('.active')) {
+                        filterContainer.querySelector('.active').classList.remove('active');
+                    }
+                    e.target.classList.add('active');
+                    const category = e.target.dataset.category;
+                    const filtered = category === 'すべて' ? allActivities : allActivities.filter(a => a.category === category);
+                    populateListAndMap(filtered);
+                }
+            });
+
+            populateListAndMap(allActivities);
+            document.getElementById('info-panel-close').onclick = closeInfoPanel;
+            
+            const loader = document.getElementById('loader');
+            loader.style.opacity = '0';
+            setTimeout(() => { 
+                loader.style.display = 'none';
+                document.getElementById('app-container').classList.add('loaded');
+            }, 500);
+        });
+    </script>
+</body>
+</html>
